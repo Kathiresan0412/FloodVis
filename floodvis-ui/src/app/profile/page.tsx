@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+import { apiGet } from "../../lib/api";
 
 type UserProfile = {
   name?: string;
@@ -32,7 +31,11 @@ function formatAction(action: string): string {
     login: "Signed in",
     signup: "Account created",
     guardian_add: "Added guardian",
+    guardian_update: "Updated guardian",
     guardian_remove: "Removed guardian",
+    contact_add: "Added contact",
+    contact_update: "Updated contact",
+    contact_remove: "Removed contact",
   };
   return labels[action] || action;
 }
@@ -70,9 +73,10 @@ export default function ProfilePage() {
     if (typeof window === "undefined") return;
 
     const stored = localStorage.getItem("fv_user_profile");
+    let parsed: UserProfile = {};
     if (stored) {
       try {
-        setProfile(JSON.parse(stored));
+        parsed = JSON.parse(stored);
       } catch {
         // ignore
       }
@@ -80,29 +84,34 @@ export default function ProfilePage() {
 
     const cookies = document.cookie.split(";").map((c) => c.trim());
     const locCookie = cookies.find((c) => c.startsWith("fv_location="));
-    if (locCookie) {
-      setLocation(decodeURIComponent(locCookie.split("=")[1] ?? "Unknown"));
-    }
+    const loc = locCookie ? decodeURIComponent(locCookie.split("=")[1] ?? "Unknown") : null;
+
+    queueMicrotask(() => {
+      if (Object.keys(parsed).length > 0) setProfile(parsed);
+      if (loc != null) setLocation(loc);
+    });
   }, []);
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("fv_token") : null;
     if (!token) {
-      setHistoryError("Sign in with your account to see login history and activity.");
+      queueMicrotask(() =>
+        setHistoryError("Sign in with your account to see login history and activity.")
+      );
       return;
     }
 
-    setLoadingHistory(true);
-    setHistoryError(null);
-
-    const headers = { Authorization: `Bearer ${token}` };
+    queueMicrotask(() => {
+      setLoadingHistory(true);
+      setHistoryError(null);
+    });
 
     Promise.all([
-      fetch(`${API_BASE}/me/login-history`, { headers }).then((r) =>
-        r.ok ? r.json() : Promise.reject(new Error("Failed to load login history"))
+      apiGet<LoginHistoryEntry[]>("/me/login-history").then(({ ok, data }) =>
+        ok ? data : Promise.reject(new Error("Failed to load login history"))
       ),
-      fetch(`${API_BASE}/me/activity-log`, { headers }).then((r) =>
-        r.ok ? r.json() : Promise.reject(new Error("Failed to load activity log"))
+      apiGet<ActivityLogEntry[]>("/me/activity-log").then(({ ok, data }) =>
+        ok ? data : Promise.reject(new Error("Failed to load activity log"))
       ),
     ])
       .then(([logins, activities]) => {
@@ -218,9 +227,9 @@ export default function ProfilePage() {
                           <span className="font-medium text-slate-900">
                             {formatAction(e.action)}
                           </span>
-                          {e.details?.name && (
+                          {e.details?.name != null && (
                             <span className="ml-2 text-slate-500">
-                              ({e.details.name as string})
+                              ({String(e.details.name)})
                             </span>
                           )}
                         </div>

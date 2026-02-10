@@ -20,7 +20,7 @@ router.get("/login-history", async (req, res) => {
 
     res.json(
       entries.map((e) => ({
-        id: e._id,
+        id: String(e._id),
         success: e.success,
         ip: e.ip,
         userAgent: e.userAgent,
@@ -44,7 +44,7 @@ router.get("/activity-log", async (req, res) => {
 
     res.json(
       entries.map((e) => ({
-        id: e._id,
+        id: String(e._id),
         action: e.action,
         details: e.details,
         ip: e.ip,
