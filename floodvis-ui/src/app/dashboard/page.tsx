@@ -1,14 +1,23 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import LocationAccess from "../../components/LocationAccess";
 import AppShell from "../../components/AppShell";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+import { API_BASE, getAuthHeaders } from "../../lib/api";
 
 // Default Sri Lanka coords when no location is set
 const DEFAULT_LAT = 6.92;
 const DEFAULT_LON = 79.87;
+
+const FloodMap = dynamic(() => import("../../components/FloodMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-40 items-center justify-center bg-slate-200/70 text-xs text-slate-500">
+      Loading map…
+    </div>
+  ),
+});
 
 function getLocationFromCookie(): { lat: number; lon: number } | null {
   if (typeof window === "undefined") return null;
@@ -50,8 +59,14 @@ export default function DashboardPage() {
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
 
   const fetchWeather = useCallback(async () => {
-    const loc = getLocationFromCookie() ?? { lat: DEFAULT_LAT, lon: DEFAULT_LON };
-    setCoords(loc);
+    const loc = getLocationFromCookie();
+    setCoords(loc ?? null);
+
+    if (!loc) {
+      setWeatherError("Allow location to see flood risk and weather for your area.");
+      setWeather(null);
+      return;
+    }
 
     const token = typeof window !== "undefined" ? localStorage.getItem("fv_token") : null;
     if (!token) {
@@ -65,7 +80,7 @@ export default function DashboardPage() {
     console.debug("[Dashboard] Fetching weather", { lat: loc.lat, lon: loc.lon, url });
     try {
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(false),
       });
       const data = await res.json().catch(() => ({}));
       console.debug("[Dashboard] Weather response", { ok: res.ok, status: res.status, data });
@@ -140,10 +155,12 @@ export default function DashboardPage() {
           </div>
 
           <div className="overflow-hidden rounded-3xl bg-white shadow-md">
-            <div className="h-40 bg-slate-200/70">
-              <div className="flex h-full items-center justify-center text-xs text-slate-500">
-                Map placeholder (Google Maps)
-              </div>
+            <div className="h-40">
+              <FloodMap
+                lat={coords?.lat ?? DEFAULT_LAT}
+                lon={coords?.lon ?? DEFAULT_LON}
+                className="h-full rounded-t-3xl"
+              />
             </div>
 
             <div className="space-y-3 p-4">

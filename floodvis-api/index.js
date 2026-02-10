@@ -7,6 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const authRoutes = require("./routes/auth");
 const guardianRoutes = require("./routes/guardians");
+const contactRoutes = require("./routes/contacts");
 const meRoutes = require("./routes/me");
 
 app.use(cors());
@@ -22,6 +23,9 @@ app.use("/auth", authRoutes);
 
 // Guardians routes (protected)
 app.use("/guardians", guardianRoutes);
+
+// Contacts routes — family, emergency, guardian (protected)
+app.use("/contacts", contactRoutes);
 
 // Current user: login history & activity log (protected)
 app.use("/me", meRoutes);

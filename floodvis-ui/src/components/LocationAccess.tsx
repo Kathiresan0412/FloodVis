@@ -8,6 +8,20 @@ function hasStoredLocation(): boolean {
   return Boolean(match?.[1]);
 }
 
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "User-Agent": "FloodVis/1.0" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { display_name?: string };
+    return data.display_name ?? null;
+  } catch {
+    return null;
+  }
+}
+
 type LocationAccessProps = {
   /** Called when lat/lon are obtained and stored; e.g. trigger a data fetch */
   onLocationUpdate?: () => void;
@@ -16,16 +30,43 @@ type LocationAccessProps = {
 export default function LocationAccess({ onLocationUpdate }: LocationAccessProps) {
   const [showPopup, setShowPopup] = useState(false);
   const [status, setStatus] = useState<string>("");
+  const [locationName, setLocationName] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
 
   useEffect(() => {
-    if (hasStoredLocation()) {
-      const match = document.cookie.match(/fv_location=([^;]+)/);
-      const coords = match ? decodeURIComponent(match[1]) : "";
-      setStatus(coords ? `Lat: ${coords.split(",")[0]?.trim()}, Lon: ${coords.split(",")[1]?.trim()}` : "");
+    const stored = hasStoredLocation();
+    const schedule = (fn: () => void) => queueMicrotask(fn);
+    if (!stored) {
+      schedule(() => setShowPopup(true));
       return;
     }
-    setShowPopup(true);
+    const match = document.cookie.match(/fv_location=([^;]+)/);
+    const coords = match ? decodeURIComponent(match[1]) : "";
+    const nameMatch = document.cookie.match(/fv_location_name=([^;]+)/);
+    const name = nameMatch ? decodeURIComponent(nameMatch[1]) : null;
+    if (!coords) return;
+    const [lat, lon] = coords.split(",").map((s) => s.trim());
+    const latNum = parseFloat(lat);
+    const lonNum = parseFloat(lon);
+    let cancelled = false;
+    schedule(() => {
+      if (!cancelled) {
+        setStatus(`Lat: ${lat}, Lon: ${lon}`);
+        setLocationName(name || null);
+      }
+    });
+    if (!name && !Number.isNaN(latNum) && !Number.isNaN(lonNum)) {
+      reverseGeocode(latNum, lonNum).then((n) => {
+        if (cancelled) return;
+        if (n) {
+          setLocationName(n);
+          document.cookie = `fv_location_name=${encodeURIComponent(n)}; path=/; max-age=${60 * 30}`;
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function handleAllow() {
@@ -37,8 +78,9 @@ export default function LocationAccess({ onLocationUpdate }: LocationAccessProps
 
     setRequesting(true);
 
+    // maximumAge: 0 so the browser always shows its permission prompt (no cached position)
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
         const latFixed = lat.toFixed(4);
@@ -53,7 +95,13 @@ export default function LocationAccess({ onLocationUpdate }: LocationAccessProps
         setShowPopup(false);
         setRequesting(false);
 
-        console.debug("[LocationAccess] Got position", { lat, lon, coords });
+        const name = await reverseGeocode(lat, lon);
+        if (name) {
+          setLocationName(name);
+          document.cookie = `fv_location_name=${encodeURIComponent(name)}; path=/; max-age=${60 * 30}`;
+        }
+
+        console.debug("[LocationAccess] Got position", { lat, lon, coords, name });
 
         onLocationUpdate?.();
       },
@@ -67,7 +115,7 @@ export default function LocationAccess({ onLocationUpdate }: LocationAccessProps
         setRequesting(false);
         console.debug("[LocationAccess] Error", { code: err.code, message: err.message });
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   }
 
@@ -75,6 +123,12 @@ export default function LocationAccess({ onLocationUpdate }: LocationAccessProps
     setStatus("Location not shared.");
     setShowPopup(false);
   }
+
+  const needsLocation =
+    status === "Location not shared." ||
+    status.includes("permission denied") ||
+    status.includes("Location unavailable") ||
+    status === "Geolocation is not available in this browser.";
 
   return (
     <>
@@ -93,6 +147,11 @@ export default function LocationAccess({ onLocationUpdate }: LocationAccessProps
             <p className="mt-2 text-sm text-slate-600">
               We use your location to show flood risk and weather for your area.
             </p>
+            {requesting && (
+              <p className="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                Check your browser for the location prompt — it may appear in the address bar or as a popup. Choose &quot;Allow&quot; to continue.
+              </p>
+            )}
             <div className="mt-5 flex gap-3">
               <button
                 type="button"
@@ -115,11 +174,27 @@ export default function LocationAccess({ onLocationUpdate }: LocationAccessProps
         </div>
       )}
 
-      {/* Status strip (shown when popup is closed or after choice) */}
-      {!showPopup && status && (
+      {/* Persistent warning when user did not allow location */}
+      {!showPopup && needsLocation && (
+        <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-semibold text-amber-800">Allow location to see flood risk</p>
+          <p className="mt-1 text-xs text-amber-700">{status}</p>
+          <button
+            type="button"
+            onClick={() => setShowPopup(true)}
+            className="mt-3 w-full rounded-full bg-amber-500 py-2.5 text-sm font-semibold text-white hover:bg-amber-600"
+          >
+            Allow location
+          </button>
+        </div>
+      )}
+
+      {/* Status strip when location is allowed */}
+      {!showPopup && status && !needsLocation && (
         <div className="mt-3 rounded-2xl bg-sky-50 p-3 text-[11px] text-slate-700">
           <p className="font-semibold text-sky-700">Location</p>
-          <p className="mt-1">{status}</p>
+          {locationName && <p className="mt-1 font-medium text-slate-800">{locationName}</p>}
+          <p className={locationName ? "mt-0.5 text-slate-500" : "mt-1"}>{status}</p>
         </div>
       )}
     </>

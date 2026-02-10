@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+import { apiPost } from "../../lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,13 +20,9 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      type AuthRes = { token?: string; user?: { name?: string; email?: string }; error?: string };
+      const { ok, data } = await apiPost<AuthRes>("/auth/login", { email, password });
+      if (!ok) {
         setError(data.error || "Login failed.");
         return;
       }

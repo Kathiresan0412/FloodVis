@@ -15,7 +15,7 @@ function generateToken(user) {
 
   return jwt.sign(
     {
-      id: user._id,
+      id: String(user._id),
       email: user.email,
       name: user.name,
     },
@@ -54,7 +54,7 @@ router.post("/signup", async (req, res) => {
 
     return res.status(201).json({
       user: {
-        id: user._id,
+        id: String(user._id),
         name: user.name,
         email: user.email,
       },
@@ -97,7 +97,7 @@ router.post("/login", async (req, res) => {
 
     return res.json({
       user: {
-        id: user._id,
+        id: String(user._id),
         name: user.name,
         email: user.email,
       },
