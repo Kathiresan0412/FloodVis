@@ -1,6 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+function hasStoredLocation(): boolean {
+  if (typeof window === "undefined") return false;
+  const match = document.cookie.match(/fv_location=([^;]+)/);
+  return Boolean(match?.[1]);
+}
 
 type LocationAccessProps = {
   /** Called when lat/lon are obtained and stored; e.g. trigger a data fetch */
@@ -8,9 +14,19 @@ type LocationAccessProps = {
 };
 
 export default function LocationAccess({ onLocationUpdate }: LocationAccessProps) {
-  const [showPopup, setShowPopup] = useState(true);
+  const [showPopup, setShowPopup] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [requesting, setRequesting] = useState(false);
+
+  useEffect(() => {
+    if (hasStoredLocation()) {
+      const match = document.cookie.match(/fv_location=([^;]+)/);
+      const coords = match ? decodeURIComponent(match[1]) : "";
+      setStatus(coords ? `Lat: ${coords.split(",")[0]?.trim()}, Lon: ${coords.split(",")[1]?.trim()}` : "");
+      return;
+    }
+    setShowPopup(true);
+  }, []);
 
   function handleAllow() {
     if (!("geolocation" in navigator)) {
