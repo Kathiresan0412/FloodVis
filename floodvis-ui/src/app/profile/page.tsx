@@ -244,9 +244,10 @@ export default function ProfilePage() {
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-xl space-y-4">
-        <div className="rounded-3xl bg-white p-6 shadow-xl">
-          <h1 className="mb-1 text-lg font-semibold text-slate-900">Profile</h1>
+      <div className="mx-auto w-full max-w-5xl">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-3xl bg-white p-6 shadow-xl">
+            <h1 className="mb-1 text-lg font-semibold text-slate-900">Profile</h1>
           <p className="mb-4 text-xs text-slate-500">
             Manage your FloodVis account and see the last known location stored
             on this device.
@@ -284,9 +285,14 @@ export default function ProfilePage() {
                       key={e.id}
                       className="flex items-center justify-between rounded-xl bg-white/80 px-3 py-2"
                     >
-                      <span className="font-medium text-slate-800">
+                      <a
+                        href={`https://www.google.com/maps?q=${e.lat},${e.lon}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-slate-800 underline decoration-emerald-500/50 underline-offset-2 hover:text-emerald-700 hover:decoration-emerald-600"
+                      >
                         {e.name ?? `${e.lat.toFixed(4)}, ${e.lon.toFixed(4)}`}
-                      </span>
+                      </a>
                       <span className="text-slate-500">
                         {formatDate(e.createdAt)}
                       </span>
@@ -504,6 +510,7 @@ export default function ProfilePage() {
               </section>
             </div>
           )}
+        </div>
         </div>
       </div>
     </AppShell>

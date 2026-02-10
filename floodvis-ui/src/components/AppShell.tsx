@@ -40,11 +40,11 @@ export default function AppShell({ children }: AppShellProps) {
         </button>
       </div>
 
-      <div className="mx-auto flex min-h-screen max-w-6xl md:px-4">
-        {/* Sidebar */}
+      <div className="mx-auto flex min-h-screen max-w-6xl md:px-4 re">
+        {/* Sidebar - content height only, not full viewport */}
         <aside
-          className={`fixed inset-y-0 left-0 z-30 w-56 transform border-r border-sky-100 bg-white/95 p-4 shadow-md transition-transform duration-200 md:static md:translate-x-0 ${
-            open ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+          className={` rounded-3xl fixed top-14 left-0 z-30 mt-[24px] w-56 transform border-r border-sky-100 bg-white/95 p-4 shadow-md transition-transform duration-200 md:static md:translate-x-0 md:self-start ${
+           open ? "translate-x-0" : "-translate-x-full md:translate-x-0"
           }`}
         >
           <div className="mb-6 hidden items-center gap-2 md:flex">
