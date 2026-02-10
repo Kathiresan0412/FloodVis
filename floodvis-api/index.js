@@ -9,6 +9,7 @@ const authRoutes = require("./routes/auth");
 const guardianRoutes = require("./routes/guardians");
 const contactRoutes = require("./routes/contacts");
 const meRoutes = require("./routes/me");
+const sosRoutes = require("./routes/sos");
 
 app.use(cors());
 app.use(express.json());
@@ -29,6 +30,9 @@ app.use("/contacts", contactRoutes);
 
 // Current user: login history & activity log (protected)
 app.use("/me", meRoutes);
+
+// SOS: send location to emergency contacts via SMS (protected)
+app.use("/sos", sosRoutes);
 
 // Connect to MongoDB and start server
 async function start() {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import AppShell from "../components/AppShell";
+import UserGreeting from "../components/UserGreeting";
 
 export default function Home() {
   return (
@@ -18,7 +19,7 @@ export default function Home() {
         </header>
 
         <section className="space-y-2">
-          <p className="text-sm font-medium text-sky-700">Hello, User 👋</p>
+          <UserGreeting />
           <p className="text-xs text-slate-500">
             Choose a section to manage your safety during floods.
           </p>
@@ -44,6 +45,11 @@ export default function Home() {
             href="/guardians"
             title="Guardian Details"
             description="Add or edit family guardian contact details."
+          />
+           <HomeCard
+            href="/profile"
+            title="Profile"
+            description="View your profile and settings."
           />
         </section>
       </main>

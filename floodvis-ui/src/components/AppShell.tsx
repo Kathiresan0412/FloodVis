@@ -10,6 +10,7 @@ const navItems = [
   { href: "/family", label: "Family" },
   { href: "/emergency", label: "Emergency" },
   { href: "/guardians", label: "Guardians" },
+  { href: "/profile", label: "Profile" },
 ];
 
 type AppShellProps = {
@@ -51,10 +52,12 @@ export default function AppShell({ children }: AppShellProps) {
               FV
             </div>
             <div>
-              <p className="text-sm font-semibold">FloodVis</p>
+              <p className="text-sm font-semibold">FloodVis
+            </p>
               <p className="text-[10px] text-slate-500">Flood safety companion</p>
             </div>
           </div>
+  
 
           <nav className="space-y-1 text-sm">
             {navItems.map((item) => {

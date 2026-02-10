@@ -3,7 +3,21 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import AppShell from "../../components/AppShell";
-import { apiGet, apiPost, apiPut, apiDelete } from "../../lib/api";
+import { apiGet, apiPost, apiPut } from "../../lib/api";
+
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "User-Agent": "FloodVis/1.0" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { display_name?: string };
+    return data.display_name ?? null;
+  } catch {
+    return null;
+  }
+}
 
 type Contact = {
   id: string;
@@ -27,6 +41,8 @@ export default function EmergencyPage() {
   const [editPhone, setEditPhone] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [addingTypeId, setAddingTypeId] = useState<string | null>(null);
+  const [sendingSos, setSendingSos] = useState(false);
+  const [sosMessage, setSosMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -142,6 +158,46 @@ export default function EmergencyPage() {
     }
   }
 
+  async function handleSendSos() {
+    if (sendingSos) return;
+    setSosMessage(null);
+    if (!("geolocation" in navigator)) {
+      setSosMessage({ type: "error", text: "Location is not available in this browser." });
+      return;
+    }
+    setSendingSos(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        let address: string | null = null;
+        try {
+          address = await reverseGeocode(lat, lon);
+        } catch {
+          // use coords only
+        }
+        const { ok, status, data } = await apiPost<{ message?: string; error?: string }>(
+          "/sos",
+          { lat, lon, address: address ?? undefined }
+        );
+        if (ok && status === 200) {
+          const msg = (data as { message?: string })?.message ?? "SOS sent to your emergency contacts.";
+          setSosMessage({ type: "success", text: msg });
+          setTimeout(() => setSosMessage(null), 6000);
+        } else {
+          const err = (data as { error?: string })?.error ?? "Failed to send SOS.";
+          setSosMessage({ type: "error", text: err });
+        }
+        setSendingSos(false);
+      },
+      () => {
+        setSosMessage({ type: "error", text: "Could not get your location. Allow location access and try again." });
+        setSendingSos(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }
+
   async function handleDelete(id: string) {
     setDeletingId(id);
     setError(null);
@@ -182,11 +238,24 @@ export default function EmergencyPage() {
           <p className="mb-4 text-xs text-slate-600">
             When you press SOS, your current location and risk level are sent to your emergency contacts and guardians.
           </p>
-          <button className="mx-auto block w-full max-w-xs rounded-full bg-red-500 py-3 text-sm font-semibold text-white shadow-lg shadow-red-200 transition hover:bg-red-600">
-            SOS · SEND ALERT
+          <button
+            type="button"
+            onClick={handleSendSos}
+            disabled={sendingSos}
+            className="mx-auto block w-full max-w-xs rounded-full bg-red-500 py-3 text-sm font-semibold text-white shadow-lg shadow-red-200 transition hover:bg-red-600 disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {sendingSos ? "Sending…" : "SOS · SEND ALERT"}
           </button>
+          {sosMessage && (
+            <p
+              className={`mt-3 text-xs ${sosMessage.type === "success" ? "text-emerald-600 font-medium" : "text-red-600"}`}
+              role="alert"
+            >
+              {sosMessage.text}
+            </p>
+          )}
           <p className="mt-3 text-[10px] text-slate-500">
-            Make sure location access is enabled on the dashboard so your last known coordinates can be attached.
+            When you press SOS, your current location is sent to emergency and guardian contacts by SMS.
           </p>
         </section>
 

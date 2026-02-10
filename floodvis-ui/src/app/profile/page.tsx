@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import AppShell from "../../components/AppShell";
 import { apiGet } from "../../lib/api";
 
 type UserProfile = {
@@ -24,6 +25,30 @@ type ActivityLogEntry = {
   ip: string | null;
   userAgent: string | null;
   createdAt: string;
+};
+
+type PaginatedResponse<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+};
+
+type LocationHistoryEntry = {
+  id: string;
+  lat: number;
+  lon: number;
+  name: string | null;
+  createdAt: string;
+};
+
+type LocationHistoryResponse = {
+  items: LocationHistoryEntry[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
 };
 
 function formatAction(action: string): string {
@@ -61,12 +86,47 @@ function formatDate(iso: string): string {
   });
 }
 
+/** Parse user agent and return a short device/platform name (e.g. "Macintosh", "Windows", "iPhone"). */
+function getDeviceName(userAgent: string | null): string {
+  if (!userAgent || !userAgent.trim()) return "Unknown device";
+  const match = userAgent.match(/\(([^)]+)\)/);
+  if (!match) return "Unknown device";
+  const platform = match[1].split(";")[0].trim();
+  const friendly: Record<string, string> = {
+    Macintosh: "Mac",
+    Windows: "Windows",
+    "Windows NT": "Windows",
+    iPhone: "iPhone",
+    iPad: "iPad",
+    Linux: "Linux",
+    "X11": "Linux",
+  };
+  return friendly[platform] ?? platform;
+}
+
+const PAGE_SIZE = 10;
+
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile>({});
   const [location, setLocation] = useState<string>("Unknown");
-  const [loginHistory, setLoginHistory] = useState<LoginHistoryEntry[]>([]);
-  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [locationHistory, setLocationHistory] = useState<LocationHistoryEntry[]>([]);
+  const [locationHistoryPage, setLocationHistoryPage] = useState(1);
+  const [locationHistoryTotal, setLocationHistoryTotal] = useState(0);
+  const [locationHistoryHasMore, setLocationHistoryHasMore] = useState(false);
+  const [locationHistoryLoading, setLocationHistoryLoading] = useState(false);
+
+  const [loginItems, setLoginItems] = useState<LoginHistoryEntry[]>([]);
+  const [loginPage, setLoginPage] = useState(1);
+  const [loginTotal, setLoginTotal] = useState(0);
+  const [loginHasMore, setLoginHasMore] = useState(false);
+  const [loadingLogin, setLoadingLogin] = useState(false);
+
+  const [activityItems, setActivityItems] = useState<ActivityLogEntry[]>([]);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityHasMore, setActivityHasMore] = useState(false);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -94,36 +154,96 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("fv_token") : null;
-    if (!token) {
-      queueMicrotask(() =>
-        setHistoryError("Sign in with your account to see login history and activity.")
-      );
-      return;
-    }
-
+    const msg = !token ? "Sign in with your account to see login history and activity." : null;
     queueMicrotask(() => {
-      setLoadingHistory(true);
-      setHistoryError(null);
+      setHistoryError(msg);
     });
-
-    Promise.all([
-      apiGet<LoginHistoryEntry[]>("/me/login-history").then(({ ok, data }) =>
-        ok ? data : Promise.reject(new Error("Failed to load login history"))
-      ),
-      apiGet<ActivityLogEntry[]>("/me/activity-log").then(({ ok, data }) =>
-        ok ? data : Promise.reject(new Error("Failed to load activity log"))
-      ),
-    ])
-      .then(([logins, activities]) => {
-        setLoginHistory(logins);
-        setActivityLog(activities);
-      })
-      .catch((err) => setHistoryError(err.message || "Could not load history"))
-      .finally(() => setLoadingHistory(false));
   }, []);
 
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("fv_token") : null;
+    if (!token) return;
+
+    const run = () => {
+      setLoadingLogin(true);
+      apiGet<PaginatedResponse<LoginHistoryEntry>>(
+      `/me/login-history?page=${loginPage}&pageSize=${PAGE_SIZE}`
+    )
+      .then(({ ok, data }) => {
+        if (!ok || !data) throw new Error("Failed to load login history");
+        setLoginItems(data.items);
+        setLoginTotal(data.total);
+        setLoginHasMore(data.hasMore);
+      })
+      .catch(() => setHistoryError("Could not load login history"))
+      .finally(() => setLoadingLogin(false));
+    };
+    queueMicrotask(run);
+  }, [loginPage]);
+
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("fv_token") : null;
+    if (!token) return;
+
+    const run = () => {
+      setLoadingActivity(true);
+      apiGet<PaginatedResponse<ActivityLogEntry>>(
+      `/me/activity-log?page=${activityPage}&pageSize=${PAGE_SIZE}`
+    )
+      .then(({ ok, data }) => {
+        if (!ok || !data) throw new Error("Failed to load activity log");
+        setActivityItems(data.items);
+        setActivityTotal(data.total);
+        setActivityHasMore(data.hasMore);
+      })
+      .catch(() => setHistoryError("Could not load activity log"))
+      .finally(() => setLoadingActivity(false));
+    };
+    queueMicrotask(run);
+  }, [activityPage]);
+
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("fv_token") : null;
+    if (!token) return;
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setLocationHistoryLoading(true);
+    });
+
+    apiGet<LocationHistoryResponse>(
+      `/me/location-history?page=${locationHistoryPage}&pageSize=10`
+    )
+      .then(({ ok, data }) => {
+        if (cancelled) return;
+        if (ok && data && "items" in data) {
+          setLocationHistory(data.items);
+          setLocationHistoryTotal(data.total);
+          setLocationHistoryHasMore(data.hasMore);
+        } else {
+          setLocationHistory([]);
+          setLocationHistoryTotal(0);
+          setLocationHistoryHasMore(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocationHistory([]);
+          setLocationHistoryTotal(0);
+          setLocationHistoryHasMore(false);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLocationHistoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [locationHistoryPage]);
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-sky-100 px-4 py-6">
+    <AppShell>
       <div className="mx-auto w-full max-w-xl space-y-4">
         <div className="rounded-3xl bg-white p-6 shadow-xl">
           <h1 className="mb-1 text-lg font-semibold text-slate-900">Profile</h1>
@@ -149,12 +269,63 @@ export default function ProfilePage() {
 
           <div className="mt-4 space-y-2 rounded-2xl bg-emerald-50 p-4 text-xs text-slate-700">
             <p className="font-semibold text-emerald-700">
-              Last stored location (from cookies)
+              Location (last 7 days)
             </p>
-            <p>{location}</p>
             <p className="text-[10px] text-slate-500">
-              This is only stored in your browser cookies and can be cleared
-              from your browser settings.
+              Stored when you allow location on the dashboard; recent entries below.
+            </p>
+            {locationHistoryLoading ? (
+              <p className="mt-2 text-slate-500">Loading…</p>
+            ) : locationHistory.length > 0 ? (
+              <>
+                <ul className="mt-3 space-y-2">
+                  {locationHistory.map((e) => (
+                    <li
+                      key={e.id}
+                      className="flex items-center justify-between rounded-xl bg-white/80 px-3 py-2"
+                    >
+                      <span className="font-medium text-slate-800">
+                        {e.name ?? `${e.lat.toFixed(4)}, ${e.lon.toFixed(4)}`}
+                      </span>
+                      <span className="text-slate-500">
+                        {formatDate(e.createdAt)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {locationHistoryTotal > 0 && (
+                  <div className="mt-3 flex items-center justify-between border-t border-emerald-200/60 pt-3">
+                    <p className="text-[10px] text-slate-500">
+                      Page {locationHistoryPage} · {locationHistoryTotal} total
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={locationHistoryPage <= 1}
+                        onClick={() => setLocationHistoryPage((p) => Math.max(1, p - 1))}
+                        className="rounded-full bg-white px-3 py-1.5 text-[10px] font-medium text-emerald-700 shadow-sm disabled:opacity-40 disabled:pointer-events-none hover:bg-emerald-100"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!locationHistoryHasMore}
+                        onClick={() => setLocationHistoryPage((p) => p + 1)}
+                        className="rounded-full bg-white px-3 py-1.5 text-[10px] font-medium text-emerald-700 shadow-sm disabled:opacity-40 disabled:pointer-events-none hover:bg-emerald-100"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-slate-500">
+                No location history yet. Allow location on the dashboard to see entries here.
+              </p>
+            )}
+            <p className="mt-2 text-[10px] text-slate-500">
+              Current device location (cookie): {location}
             </p>
           </div>
         </div>
@@ -178,80 +349,163 @@ export default function ProfilePage() {
             </p>
           )}
 
-          {loadingHistory && (
+          {(loadingLogin || loadingActivity) && !loginItems?.length && !activityItems.length && (
             <p className="text-xs text-slate-500">Loading…</p>
           )}
 
-          {!loadingHistory && !historyError && (loginHistory.length > 0 || activityLog.length > 0) && (
-            <div className="space-y-4">
-              {loginHistory.length > 0 && (
-                <div>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">
-                    Recent logins
+          {!historyError && (
+            <div className="space-y-6">
+              {/* Login history */}
+              <section className="rounded-2xl border border-slate-200/80 bg-slate-50/50 overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-200/80 bg-white px-4 py-3">
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    Login history
                   </h3>
-                  <ul className="space-y-2">
-                    {loginHistory.map((e) => (
-                      <li
-                        key={e.id}
-                        className="flex items-center justify-between rounded-2xl bg-slate-50 px-3 py-2 text-xs"
-                      >
-                        <div>
-                          <span className="font-medium text-slate-900">
-                            {e.success ? "Successful sign-in" : "Failed sign-in"}
-                          </span>
-                          {e.ip && (
-                            <span className="ml-2 text-slate-500">IP: {e.ip}</span>
-                          )}
-                        </div>
-                        <span className="text-slate-500">
-                          {formatDate(e.createdAt)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  {loginTotal > 0 && (
+                    <span className="text-[10px] text-slate-500">
+                      {loginTotal} total
+                    </span>
+                  )}
                 </div>
-              )}
+                {loadingLogin && !loginItems.length ? (
+                  <p className="px-4 py-6 text-center text-xs text-slate-500">Loading…</p>
+                ) : loginItems.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-xs text-slate-500">
+                    No login history yet.
+                  </p>
+                ) : (
+                  <>
+                    <ul className="divide-y divide-slate-200/80">
+                      {loginItems.map((e) => (
+                        <li
+                          key={e.id}
+                          className="flex items-center justify-between gap-3 px-4 py-3 text-xs transition-colors hover:bg-white/60"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={`inline-flex h-2 w-2 shrink-0 rounded-full ${
+                                e.success ? "bg-emerald-500" : "bg-amber-500"
+                              }`}
+                              aria-hidden
+                            />
+                            <span className="font-medium text-slate-900">
+                              {e.success ? "Successful sign-in" : "Failed sign-in"}
+                            </span>
+                            {e.userAgent && (
+                              <span className="hidden truncate text-slate-500 sm:inline">
+                                · {getDeviceName(e.userAgent)}
+                              </span>
+                            )}
+                          </div>
+                          <span className="shrink-0 text-slate-500 tabular-nums">
+                            {formatDate(e.createdAt)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {loginTotal > PAGE_SIZE && (
+                      <div className="flex items-center justify-between border-t border-slate-200/80 bg-white px-4 py-2">
+                        <span className="text-[10px] text-slate-500">
+                          Page {loginPage} of {Math.ceil(loginTotal / PAGE_SIZE) || 1}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={loginPage <= 1 || loadingLogin}
+                            onClick={() => setLoginPage((p) => Math.max(1, p - 1))}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-medium text-slate-700 shadow-sm disabled:opacity-50 disabled:pointer-events-none hover:bg-slate-50"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!loginHasMore || loadingLogin}
+                            onClick={() => setLoginPage((p) => p + 1)}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-medium text-slate-700 shadow-sm disabled:opacity-50 disabled:pointer-events-none hover:bg-slate-50"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
 
-              {activityLog.length > 0 && (
-                <div>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">
+              {/* Activity log */}
+              <section className="rounded-2xl border border-slate-200/80 bg-slate-50/50 overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-200/80 bg-white px-4 py-3">
+                  <h3 className="text-sm font-semibold text-slate-800">
                     Activity log
                   </h3>
-                  <ul className="space-y-2">
-                    {activityLog.map((e) => (
-                      <li
-                        key={e.id}
-                        className="flex items-center justify-between rounded-2xl bg-slate-50 px-3 py-2 text-xs"
-                      >
-                        <div>
-                          <span className="font-medium text-slate-900">
-                            {formatAction(e.action)}
-                          </span>
-                          {e.details?.name != null && (
-                            <span className="ml-2 text-slate-500">
-                              ({String(e.details.name)})
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-slate-500">
-                          {formatDate(e.createdAt)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  {activityTotal > 0 && (
+                    <span className="text-[10px] text-slate-500">
+                      {activityTotal} total
+                    </span>
+                  )}
                 </div>
-              )}
+                {loadingActivity && !activityItems.length ? (
+                  <p className="px-4 py-6 text-center text-xs text-slate-500">Loading…</p>
+                ) : activityItems.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-xs text-slate-500">
+                    No activity yet.
+                  </p>
+                ) : (
+                  <>
+                    <ul className="divide-y divide-slate-200/80">
+                      {activityItems.map((e) => (
+                        <li
+                          key={e.id}
+                          className="flex items-center justify-between gap-3 px-4 py-3 text-xs transition-colors hover:bg-white/60"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="font-medium text-slate-900">
+                              {formatAction(e.action)}
+                            </span>
+                            {e.details?.name != null && (
+                              <span className="truncate text-slate-500">
+                                ({String(e.details.name)})
+                              </span>
+                            )}
+                          </div>
+                          <span className="shrink-0 text-slate-500 tabular-nums">
+                            {formatDate(e.createdAt)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {activityTotal > PAGE_SIZE && (
+                      <div className="flex items-center justify-between border-t border-slate-200/80 bg-white px-4 py-2">
+                        <span className="text-[10px] text-slate-500">
+                          Page {activityPage} of {Math.ceil(activityTotal / PAGE_SIZE) || 1}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={activityPage <= 1 || loadingActivity}
+                            onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-medium text-slate-700 shadow-sm disabled:opacity-50 disabled:pointer-events-none hover:bg-slate-50"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!activityHasMore || loadingActivity}
+                            onClick={() => setActivityPage((p) => p + 1)}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-medium text-slate-700 shadow-sm disabled:opacity-50 disabled:pointer-events-none hover:bg-slate-50"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
             </div>
-          )}
-
-          {!loadingHistory && !historyError && loginHistory.length === 0 && activityLog.length === 0 && (
-            <p className="text-xs text-slate-500">
-              No login history or activity yet. Sign in and use the app to see
-              entries here.
-            </p>
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

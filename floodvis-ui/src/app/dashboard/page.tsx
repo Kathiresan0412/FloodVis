@@ -4,11 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import LocationAccess from "../../components/LocationAccess";
 import AppShell from "../../components/AppShell";
-import { API_BASE, getAuthHeaders } from "../../lib/api";
-
-// Default Sri Lanka coords when no location is set
-const DEFAULT_LAT = 6.92;
-const DEFAULT_LON = 79.87;
+import { API_BASE, getAuthHeaders, apiPost } from "../../lib/api";
 
 const FloodMap = dynamic(() => import("../../components/FloodMap"), {
   ssr: false,
@@ -18,6 +14,20 @@ const FloodMap = dynamic(() => import("../../components/FloodMap"), {
     </div>
   ),
 });
+
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "User-Agent": "FloodVis/1.0" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { display_name?: string };
+    return data.display_name ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function getLocationFromCookie(): { lat: number; lon: number } | null {
   if (typeof window === "undefined") return null;
@@ -57,6 +67,8 @@ export default function DashboardPage() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [sendingSos, setSendingSos] = useState(false);
+  const [sosMessage, setSosMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const fetchWeather = useCallback(async () => {
     const loc = getLocationFromCookie();
@@ -102,9 +114,50 @@ export default function DashboardPage() {
     fetchWeather();
   }, [fetchWeather]);
 
+  function handleSendSos() {
+    if (sendingSos) return;
+    setSosMessage(null);
+    if (!("geolocation" in navigator)) {
+      setSosMessage({ type: "error", text: "Location is not available in this browser." });
+      return;
+    }
+    setSendingSos(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        let address: string | null = null;
+        try {
+          address = await reverseGeocode(lat, lon);
+        } catch {
+          // use coords only
+        }
+        const { ok, status, data } = await apiPost<{ message?: string; error?: string }>(
+          "/sos",
+          { lat, lon, address: address ?? undefined }
+        );
+        if (ok && status === 200) {
+          const msg = (data as { message?: string })?.message ?? "SOS sent to your emergency contacts.";
+          setSosMessage({ type: "success", text: msg });
+          setTimeout(() => setSosMessage(null), 6000);
+        } else {
+          const err = (data as { error?: string })?.error ?? "Failed to send SOS.";
+          setSosMessage({ type: "error", text: err });
+        }
+        setSendingSos(false);
+      },
+      () => {
+        setSosMessage({ type: "error", text: "Could not get your location. Allow location access and try again." });
+        setSendingSos(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }
+
   const temp = weather?.main?.temp;
   const humidity = weather?.main?.humidity ?? 0;
-  const riskScore = temp != null ? getRiskFromTempHumidity(temp, humidity) : 13.9;
+  const hasLocationData = coords != null && weather != null;
+  const riskScore = temp != null ? getRiskFromTempHumidity(temp, humidity) : 0;
   const riskLabelStr = getRiskLabel(riskScore);
   const description = weather?.weather?.[0]?.description ?? "—";
   const windSpeed = weather?.wind?.speed ?? 0;
@@ -126,9 +179,22 @@ export default function DashboardPage() {
             <p className="mb-4 text-xs text-slate-500">
               One-touch SOS alert sends your location &amp; risk level.
             </p>
-            <button className="mx-auto block w-full max-w-xs rounded-full bg-red-500 py-3 text-sm font-semibold text-white shadow-lg shadow-red-200 transition hover:bg-red-600">
-              SOS · SEND ALERT
+            <button
+              type="button"
+              onClick={handleSendSos}
+              disabled={sendingSos}
+              className="mx-auto block w-full max-w-xs rounded-full bg-red-500 py-3 text-sm font-semibold text-white shadow-lg shadow-red-200 transition hover:bg-red-600 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {sendingSos ? "Sending…" : "SOS · SEND ALERT"}
             </button>
+            {sosMessage && (
+              <p
+                className={`mt-3 text-xs ${sosMessage.type === "success" ? "text-emerald-600 font-medium" : "text-red-600"}`}
+                role="alert"
+              >
+                {sosMessage.text}
+              </p>
+            )}
           </div>
 
           <LocationAccess onLocationUpdate={fetchWeather} />
@@ -156,11 +222,22 @@ export default function DashboardPage() {
 
           <div className="overflow-hidden rounded-3xl bg-white shadow-md">
             <div className="h-40">
-              <FloodMap
-                lat={coords?.lat ?? DEFAULT_LAT}
-                lon={coords?.lon ?? DEFAULT_LON}
-                className="h-full rounded-t-3xl"
-              />
+              {coords ? (
+                <FloodMap
+                  lat={coords.lat}
+                  lon={coords.lon}
+                  className="h-full rounded-t-3xl"
+                />
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-2 rounded-t-3xl bg-slate-100 text-center">
+                  <p className="text-sm font-medium text-slate-600">
+                    Map for your area
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Allow location above to see flood risk and weather on the map.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-3 p-4">
@@ -170,29 +247,37 @@ export default function DashboardPage() {
               <div className="flex items-baseline justify-between">
                 <div className="flex items-baseline gap-2">
                   <p className="text-2xl font-semibold text-emerald-600">
-                    {weatherLoading ? "…" : riskScore.toFixed(1)}
+                    {!hasLocationData
+                      ? "—"
+                      : weatherLoading
+                        ? "…"
+                        : riskScore.toFixed(1)}
                   </p>
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-semibold text-emerald-700">
-                    {riskLabelStr}
-                  </span>
+                  {hasLocationData && (
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-semibold text-emerald-700">
+                      {riskLabelStr}
+                    </span>
+                  )}
                 </div>
                 <p className="text-[10px] text-slate-400">
                   Lat: {coords?.lat.toFixed(4) ?? "—"}, Lon: {coords?.lon.toFixed(4) ?? "—"}
                 </p>
               </div>
 
-              <div className="space-y-1">
-                <div className="flex justify-between text-[10px] text-slate-500">
-                  <span>Current Risk Level ({riskScore.toFixed(1)})</span>
-                  <span>{riskLabelStr}</span>
+              {hasLocationData && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-slate-500">
+                    <span>Current Risk Level ({riskScore.toFixed(1)})</span>
+                    <span>{riskLabelStr}</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-slate-100">
+                    <div
+                      className="h-2 rounded-full bg-gradient-to-r from-emerald-400 via-yellow-400 to-red-500"
+                      style={{ width: `${Math.min(100, (riskScore / 100) * 100)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-2 w-full rounded-full bg-slate-100">
-                  <div
-                    className="h-2 rounded-full bg-gradient-to-r from-emerald-400 via-yellow-400 to-red-500"
-                    style={{ width: `${Math.min(100, (riskScore / 100) * 100)}%` }}
-                  />
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </section>
@@ -230,7 +315,13 @@ export default function DashboardPage() {
             />
             <MetricCard
               label="Risk Score"
-              value={weatherLoading ? "…" : `${riskScore.toFixed(1)} (${riskLabelStr})`}
+              value={
+                !hasLocationData
+                  ? "—"
+                  : weatherLoading
+                    ? "…"
+                    : `${riskScore.toFixed(1)} (${riskLabelStr})`
+              }
             />
           </div>
           <div className="mt-4 rounded-2xl bg-sky-50 p-3 text-[10px] leading-relaxed text-slate-600">
